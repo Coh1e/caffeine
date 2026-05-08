@@ -1,0 +1,31 @@
+# Build outputs
+amped.exe
+*.obj
+*.res
+*.pdb
+*.ilk
+*.lib
+*.exp
+*.map
+
+# CMake / build trees
+build/
+out/
+cmake-build-*/
+
+# IDE / Visual Studio
+.vs/
+.vscode/
+*.suo
+*.user
+*.vcxproj
+*.vcxproj.filters
+*.sln
+
+# rc.exe scratch
+RCa*
+
+# OS noise
+Thumbs.db
+desktop.ini
+.DS_Store
