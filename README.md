@@ -1,89 +1,65 @@
-# Amped (满血)
+# Caffeine
 
-A tiny Caffeine-style Windows tray utility. Click the tray icon to keep your PC awake; click again to release.
+A tiny Windows tray utility that keeps your PC awake. Launch it and your
+computer stops sleeping; double-click the tray icon to quit and restore
+normal power behavior. No window, no settings dialog — just the tray.
 
 - **Language:** C++20, pure Win32 (no Qt, no .NET, no MFC, no Electron).
 - **Footprint:** single source file, links only `user32` and `shell32`.
 - **Permissions:** runs as a normal user. No admin, no service.
 
+## Behavior
+
+| Action | Effect |
+|---|---|
+| **Launch** | Keeps the system awake immediately (display may still sleep). |
+| **Right-click** tray icon | Menu: `阻止息屏` (checkable), `退出`. |
+| `阻止息屏` (checked) | Also keeps the display on (`ES_DISPLAY_REQUIRED`). |
+| **Double-click** tray icon | Quit — restores normal sleep and screen-off. |
+| Single left-click | Nothing. |
+
+Tooltip reads `Caffeine：防休眠中（屏幕仍会息屏）` by default, and
+`Caffeine：防休眠 + 防息屏` once `阻止息屏` is enabled.
+
+Only one instance runs per user session (a named mutex blocks duplicates).
+
 ## Build
 
-Requires the MSVC toolchain (Visual Studio Build Tools or full VS) with `cl.exe` and `rc.exe` on `PATH`. Open a **"Developer Command Prompt for VS"** (or run `vcvarsall.bat` in your shell) so those tools resolve.
-
-### Option A — `build.bat` (simplest)
-
-```
-build.bat
-```
-
-This regenerates `full.ico` / `empty.ico` if missing, compiles the resource script, then builds `amped.exe`.
-
-### Option B — CMake
+Requires the MSVC toolchain (Visual Studio Build Tools or full VS).
 
 ```
 cmake -S . -B build
 cmake --build build --config Release
 ```
 
-### Raw `cl` command (if you prefer)
+The executable is produced at `build\Release\caffeine.exe`.
 
-```
-rc /nologo /fo amped.res amped.rc
-cl /nologo /std:c++20 /W4 /EHsc /O2 /utf-8 main.cpp amped.res /link /SUBSYSTEM:WINDOWS /OUT:amped.exe user32.lib shell32.lib
-```
-
-## Run
-
-Double-click `amped.exe`.
-
-| Action | Effect |
-|---|---|
-| **Left-click** tray icon | Toggle 满血 ↔ 空杯 |
-| **Right-click** tray icon | Menu: `Toggle Amped`, `Exit` |
-| Tooltip when 满血 | `Amped: full power, keeping PC awake` |
-| Tooltip when 空杯 | `Amped: empty, normal sleep allowed` |
-
-Yellow lightning ⚡ = keep-awake is on. Gray outline = idle, normal sleep allowed. Default state on launch is **empty** — you opt in with a click.
-
-Only one instance can run per user session (a named mutex blocks duplicates).
-
-## What Amped *can* prevent
+## What Caffeine *can* prevent
 
 - The system going to sleep due to idleness.
-- The display turning off due to idleness (we set `ES_DISPLAY_REQUIRED`).
+- The display turning off due to idleness — only while `阻止息屏` is enabled.
 
-## What Amped *cannot* prevent
+## What Caffeine *cannot* prevent
 
 - The user manually clicking **Sleep** / **Shut down** / **Hibernate**.
 - A laptop sleeping when the lid is closed (lid-close policy).
 - Enterprise Group Policy that forces lock or hibernate.
 - Low-battery hibernation.
 - Forced reboot from Windows Update.
-- Power-off / shut-down.
 
 `SetThreadExecutionState` is a *hint* to the power manager, not an override.
 
 ## Verifying it actually works
 
-While Amped is in the **满血** state, in an admin command prompt:
+While Caffeine is running, in a command prompt:
 
 ```
 powercfg /requests
 ```
 
-You should see `[PROCESS] amped.exe` listed under both `SYSTEM:` and `DISPLAY:`. Toggle to **空杯** and rerun — `amped.exe` should disappear from those sections.
-
-## Customizing the icon
-
-`make_icons.ps1` draws a stylized lightning bolt with `System.Drawing` and packages 16/32/48 px frames into multi-resolution `.ico` files. Two ways to customize:
-
-1. **Tweak the design** — edit the polygon vertices or fill colors near the top of `make_icons.ps1`, then rerun:
-   ```
-   powershell -ExecutionPolicy Bypass -File make_icons.ps1
-   ```
-2. **Drop in your own** — replace `full.ico` / `empty.ico` with any pair of multi-resolution icons of your choosing, then rebuild.
-
-`full_preview.png` and `empty_preview.png` are 128 px PNG previews written next to the icons for visual eyeballing — they are **not** used at build time.
+You should see `[PROCESS] caffeine.exe` under `SYSTEM:`. Enable `阻止息屏`
+and rerun — it should also appear under `DISPLAY:`. Quit (double-click) and
+rerun — `caffeine.exe` disappears from both sections.
 
 ## File map
 
@@ -91,15 +67,34 @@ You should see `[PROCESS] amped.exe` listed under both `SYSTEM:` and `DISPLAY:`.
 |---|---|
 | `main.cpp` | All the logic — RAII guards, tray/window handling, message loop. |
 | `resource.h` | Resource and command IDs. |
-| `amped.rc` | References icons + manifest. |
-| `amped.manifest` | Common Controls v6 + per-monitor DPI awareness. |
-| `make_icons.ps1` | Generates `full.ico` / `empty.ico` (and 128 px PNG previews). |
-| `build.bat` | One-shot build: icons → rc → cl. |
-| `CMakeLists.txt` | CMake build (with the same icon-generation step wired in). |
+| `caffeine.rc` | References the icon + manifest. |
+| `caffeine.manifest` | Common Controls v6 + per-monitor DPI awareness. |
+| `caffeine.ico` | Coffee-cup tray icon. |
+| `CMakeLists.txt` | CMake build. |
 
 ## Implementation notes
 
-- Hidden **top-level** window (not `HWND_MESSAGE`) so it receives the `TaskbarCreated` shell broadcast and can re-add the icon if Explorer restarts.
-- `SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED)` while active; `ES_CONTINUOUS` to release. RAII destructor unconditionally releases on exit.
-- Tray callback uses `NOTIFYICON_VERSION_4`, with mouse events arriving in `LOWORD(lParam)`.
-- Single-instance via `Local\AmpedTraySingleton` named mutex.
+- Hidden **top-level** window (not `HWND_MESSAGE`) so it receives the
+  `TaskbarCreated` shell broadcast and can re-add the icon if Explorer restarts.
+- `SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED [| ES_DISPLAY_REQUIRED])`
+  while running; `ES_CONTINUOUS` to release. The RAII destructor unconditionally
+  releases on exit.
+- Tray callback uses `NOTIFYICON_VERSION_4`, with mouse events in `LOWORD(lParam)`.
+- Single-instance via `Local\CaffeineTraySingleton` named mutex.
+
+## Credits / 致谢
+
+This project was inspired by, and reuses an asset from, the original
+**Caffeine** by Kyle Leong — thank you.
+
+- Coffee-cup tray icon (`caffeine.ico`) is taken from
+  [kyleleong/caffeine](https://github.com/kyleleong/caffeine)
+  (MIT License, © 2020 Kyle Leong). The interaction design also drew
+  inspiration from that project. 感谢 Kyle Leong。
+- That icon in turn originates from
+  [famfamfam Silk Icons](https://www.famfamfam.com/lab/icons/silk/)
+  (CC-BY 2.5, by Mark James) and
+  [Freepik](https://www.flaticon.com/authors/freepik/). 一并致谢原作者。
+
+See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) for the upstream MIT
+license text.

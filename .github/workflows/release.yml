@@ -1,0 +1,42 @@
+name: build-and-release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure (CMake)
+        run: cmake -S . -B build
+
+      - name: Build (Release)
+        run: cmake --build build --config Release
+
+      - name: Stage executable
+        run: Copy-Item build\Release\caffeine.exe caffeine.exe
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: caffeine
+          path: caffeine.exe
+
+      # Publish a GitHub Release with caffeine.exe attached, but only when
+      # the workflow was triggered by pushing a tag like v1.0.0.
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: caffeine.exe
+          generate_release_notes: true

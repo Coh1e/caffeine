@@ -1,8 +1,10 @@
-// main.cpp — Amped (满血)
+// main.cpp — Caffeine
 //
-// Tiny Windows tray utility that toggles SetThreadExecutionState to keep
-// the system (and display) from going to sleep due to idleness. Single
-// source file, pure Win32, no third-party dependencies.
+// Tiny Windows tray utility that keeps the system awake while it runs.
+// Launch → system stays awake (display may still sleep). The right-click
+// menu offers a "阻止息屏" toggle that additionally keeps the display on,
+// plus Exit. Double-clicking the tray icon quits (restoring normal sleep
+// and screen-off). Single source file, pure Win32, no third-party deps.
 
 #define UNICODE
 #define _UNICODE
@@ -27,10 +29,39 @@ namespace {
 
 constexpr UINT    WM_APP_TRAY   = WM_APP + 1;   // tray icon callback message
 constexpr UINT    TRAY_ICON_ID  = 1;
-constexpr wchar_t kWindowClass[] = L"AmpedTrayWindowClass";
-constexpr wchar_t kMutexName[]   = L"Local\\AmpedTraySingleton";
-constexpr wchar_t kTipFull[]     = L"Amped: full power, keeping PC awake";
-constexpr wchar_t kTipEmpty[]    = L"Amped: empty, normal sleep allowed";
+constexpr wchar_t kWindowClass[] = L"CaffeineTrayWindowClass";
+constexpr wchar_t kMutexName[]   = L"Local\\CaffeineTraySingleton";
+
+// --------------------------------------------------------------------------
+// Localization — pick Chinese or English by the system UI language.
+// --------------------------------------------------------------------------
+struct Strings {
+    const wchar_t* tipAwake;     // tooltip: system kept awake, display may sleep
+    const wchar_t* tipDisplay;   // tooltip: system + display kept awake
+    const wchar_t* menuDisplay;  // menu item: keep the display on (checkable)
+    const wchar_t* menuExit;     // menu item: quit
+};
+
+const Strings kZh = {
+    L"Caffeine：防休眠中（屏幕仍会息屏）",
+    L"Caffeine：防休眠 + 防息屏",
+    L"阻止息屏",
+    L"退出",
+};
+
+const Strings kEn = {
+    L"Caffeine: awake (display may still sleep)",
+    L"Caffeine: awake + display kept on",
+    L"Keep display on",
+    L"Exit",
+};
+
+// Chosen once on first use, from the user's preferred UI language.
+const Strings& Loc() {
+    static const Strings& s =
+        (PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_CHINESE) ? kZh : kEn;
+    return s;
+}
 
 // --------------------------------------------------------------------------
 // Globals (kept few and explicit)
@@ -42,8 +73,10 @@ UINT      g_taskbarCreatedMsg = 0;   // RegisterWindowMessageW(L"TaskbarCreated"
 // --------------------------------------------------------------------------
 // AwakeGuard — RAII wrapper around SetThreadExecutionState.
 //
-// SetActive(true)  → ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED
-// SetActive(false) → ES_CONTINUOUS  (release, restore default policy)
+// While running, the system is always kept awake. The display is only kept
+// awake when the "阻止息屏" toggle is on:
+//   Apply(false) → ES_CONTINUOUS | ES_SYSTEM_REQUIRED
+//   Apply(true)  → ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED
 //
 // Destructor unconditionally calls ES_CONTINUOUS so any exit path
 // (normal, exception, std::exit) leaves Windows back on its default
@@ -51,18 +84,17 @@ UINT      g_taskbarCreatedMsg = 0;   // RegisterWindowMessageW(L"TaskbarCreated"
 // --------------------------------------------------------------------------
 class AwakeGuard {
 public:
-    void SetActive(bool on) noexcept {
-        const EXECUTION_STATE flags = on
-            ? (ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED)
-            : ES_CONTINUOUS;
+    void Apply(bool blockDisplay) noexcept {
+        EXECUTION_STATE flags = ES_CONTINUOUS | ES_SYSTEM_REQUIRED;
+        if (blockDisplay) flags |= ES_DISPLAY_REQUIRED;
         SetThreadExecutionState(flags);
-        active_ = on;
+        blockDisplay_ = blockDisplay;
     }
-    bool IsActive() const noexcept { return active_; }
+    bool BlocksDisplay() const noexcept { return blockDisplay_; }
     ~AwakeGuard() { SetThreadExecutionState(ES_CONTINUOUS); }
 
 private:
-    bool active_ = false;
+    bool blockDisplay_ = false;
 };
 
 // --------------------------------------------------------------------------
@@ -125,31 +157,29 @@ std::optional<TrayIcon> g_tray;
 // Helpers
 // --------------------------------------------------------------------------
 
-// Load IDI_FULL or IDI_EMPTY at the system small-icon size. If the
-// resource is missing for any reason (e.g. PE was stripped), fall back
-// to an unmistakably distinct stock system icon so we never end up with
-// a blank tray slot.
-HICON LoadStateIcon(bool full) {
+// Load the coffee-cup icon at the system small-icon size. If the resource
+// is missing for any reason (e.g. PE was stripped), fall back to a stock
+// system icon so we never end up with a blank tray slot.
+HICON LoadAppIcon() {
     const int cx = GetSystemMetrics(SM_CXSMICON);
     const int cy = GetSystemMetrics(SM_CYSMICON);
     HICON h = static_cast<HICON>(LoadImageW(
-        g_hInst,
-        MAKEINTRESOURCEW(full ? IDI_FULL : IDI_EMPTY),
+        g_hInst, MAKEINTRESOURCEW(IDI_CAFFEINE),
         IMAGE_ICON, cx, cy, LR_DEFAULTCOLOR));
     if (!h) {
-        h = LoadIconW(nullptr, full ? IDI_WARNING : IDI_INFORMATION);
+        h = LoadIconW(nullptr, IDI_INFORMATION);
     }
     return h;
 }
 
 void RefreshTray() {
     if (!g_tray) return;
-    const bool full = g_awake.IsActive();
-    g_tray->Show(LoadStateIcon(full), full ? kTipFull : kTipEmpty);
+    g_tray->Show(LoadAppIcon(),
+                 g_awake.BlocksDisplay() ? Loc().tipDisplay : Loc().tipAwake);
 }
 
-void ToggleAmped() {
-    g_awake.SetActive(!g_awake.IsActive());
+void ToggleDisplayBlock() {
+    g_awake.Apply(!g_awake.BlocksDisplay());
     RefreshTray();
 }
 
@@ -161,10 +191,10 @@ void ShowContextMenu(HWND hwnd) {
     if (!menu) return;
 
     AppendMenuW(menu,
-        MF_STRING | (g_awake.IsActive() ? MF_CHECKED : MF_UNCHECKED),
-        ID_TRAY_TOGGLE, L"Toggle Amped");
+        MF_STRING | (g_awake.BlocksDisplay() ? MF_CHECKED : MF_UNCHECKED),
+        ID_TRAY_DISPLAY, Loc().menuDisplay);
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING, ID_TRAY_EXIT, L"Exit");
+    AppendMenuW(menu, MF_STRING, ID_TRAY_EXIT, Loc().menuExit);
 
     // Required so the menu dismisses correctly when the user clicks
     // outside it. Classic shell-tray pitfall.
@@ -185,8 +215,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     // created OR when explorer.exe is restarted; re-add the tray icon.
     if (msg == g_taskbarCreatedMsg && g_taskbarCreatedMsg != 0) {
         if (g_tray) {
-            const bool full = g_awake.IsActive();
-            g_tray->ReAdd(LoadStateIcon(full), full ? kTipFull : kTipEmpty);
+            g_tray->ReAdd(LoadAppIcon(),
+                          g_awake.BlocksDisplay() ? Loc().tipDisplay : Loc().tipAwake);
         }
         return 0;
     }
@@ -196,20 +226,22 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         // With NOTIFYICON_VERSION_4, LOWORD(lParam) carries the actual
         // mouse / keyboard event.
         switch (LOWORD(lParam)) {
-        case WM_LBUTTONUP:
-            ToggleAmped();
+        case WM_LBUTTONDBLCLK:
+            // Double-click quits — teardown restores normal sleep/screen-off.
+            DestroyWindow(hwnd);
             return 0;
         case WM_RBUTTONUP:
         case WM_CONTEXTMENU:
             ShowContextMenu(hwnd);
             return 0;
+        // Single left-click intentionally does nothing.
         }
         return 0;
 
     case WM_COMMAND:
         switch (LOWORD(wParam)) {
-        case ID_TRAY_TOGGLE:
-            ToggleAmped();
+        case ID_TRAY_DISPLAY:
+            ToggleDisplayBlock();
             return 0;
         case ID_TRAY_EXIT:
             DestroyWindow(hwnd);
@@ -232,7 +264,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int) {
     g_hInst = hInstance;
 
-    // Single-instance guard: bail out silently if another amped.exe is
+    // Single-instance guard: bail out silently if another caffeine.exe is
     // already running in this user session. Local\\ namespace ensures we
     // don't collide with other sessions / users.
     HANDLE mutex = CreateMutexW(nullptr, FALSE, kMutexName);
@@ -258,7 +290,7 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int) {
     // window would never see it and the icon wouldn't recover after
     // explorer.exe restart.
     HWND hwnd = CreateWindowExW(
-        0, kWindowClass, L"Amped",
+        0, kWindowClass, L"Caffeine",
         WS_OVERLAPPED, 0, 0, 0, 0,
         nullptr, nullptr, hInstance, nullptr);
     if (!hwnd) {
@@ -269,9 +301,9 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int) {
 
     g_tray.emplace(hwnd, WM_APP_TRAY, TRAY_ICON_ID);
 
-    // Default to "empty": don't surprise the user by holding their
-    // machine awake at launch. They opt in with a left click.
-    g_awake.SetActive(false);
+    // Keep the system awake from launch (display sleep still allowed until
+    // the user enables "阻止息屏").
+    g_awake.Apply(false);
     RefreshTray();
 
     MSG msg{};
@@ -282,9 +314,8 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int) {
 
     // Deterministic teardown:
     //   1. NIM_DELETE the tray icon       (TrayIcon dtor via reset())
-    //   2. ES_CONTINUOUS                  (explicit, plus AwakeGuard dtor)
+    //   2. ES_CONTINUOUS                  (AwakeGuard dtor; release hold)
     g_tray.reset();
-    g_awake.SetActive(false);
 
     CloseHandle(mutex);
     return static_cast<int>(msg.wParam);

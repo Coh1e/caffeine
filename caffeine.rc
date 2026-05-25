@@ -1,0 +1,8 @@
+#include <windows.h>
+#include "resource.h"
+
+// Coffee-cup tray icon borrowed from kyleleong/caffeine (MIT). See README Credits.
+IDI_CAFFEINE ICON "caffeine.ico"
+
+// Application manifest: enables Common Controls v6 and per-monitor DPI.
+1 RT_MANIFEST "caffeine.manifest"
