@@ -21,6 +21,7 @@ cmake-build-*/
 *.vcxproj
 *.vcxproj.filters
 *.sln
+.idea/
 
 # rc.exe scratch
 RCa*

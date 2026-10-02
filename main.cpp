@@ -111,7 +111,7 @@ public:
         nid_.cbSize           = sizeof(nid_);
         nid_.hWnd             = owner;
         nid_.uID              = id;
-        nid_.uFlags           = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+        nid_.uFlags           = NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_SHOWTIP;
         nid_.uCallbackMessage = callbackMsg;
         nid_.uVersion         = NOTIFYICON_VERSION_4;
     }
@@ -133,7 +133,12 @@ public:
                 added_ = true;
                 Shell_NotifyIconW(NIM_SETVERSION, &nid_);
             }
-        } else {
+        }
+        // Re-send the icon + tooltip once the icon is present. The tooltip set
+        // during NIM_ADD is applied under the default icon version; after
+        // NIM_SETVERSION switches the shell to v4 the tooltip is not re-rendered
+        // until it is re-sent with NIM_MODIFY.
+        if (added_) {
             Shell_NotifyIconW(NIM_MODIFY, &nid_);
         }
     }
